@@ -5,12 +5,18 @@ Code for integration of Water Linked DVL A50/A125 with BlueOS and ArduSub
 import json
 import math
 import os
+import numpy as np
 import socket
 import threading
 import time
 from enum import Enum
 from select import select
 from typing import Any, Dict, List
+from ./Wayfinder-master/dvl/dvl import *
+from ./Wayfinder-master/dvl/commands import *  
+from ./Wayfinder-master/dvl/packets import *  
+from ./Wayfinder-master/dvl/system import *
+from ./Wayfinder-master/dvl/util import *
 
 from loguru import logger
 
@@ -18,9 +24,23 @@ from blueoshelper import request
 from dvlfinder import find_the_dvl
 from mavlink2resthelper import GPS_GLOBAL_ORIGIN_ID, Mavlink2RestHelper
 
-HOSTNAME = "waterlinked-dvl.local"
+# HOSTNAME = "waterlinked-dvl.local"
 DVL_DOWN = 1
 DVL_FORWARD = 2
+DVL_CUSTOM_ORIENTATION = 3
+
+# DVL_CUSTOM_ORIENTATION is for another orientation ( like us )
+roll_DVL = np.radians(180)
+pitch_DVL = np.radians(0)
+yaw_DVL = np.radians(135)
+rotMatrix = np.array([  
+    [np.cos(yaw_DVL) * np.cos(pitch_DVL), np.cos(yaw_DVL) * np.sin(pitch_DVL) * np.sin(roll_DVL) - np.sin(yaw_DVL) * np.cos(roll_DVL), np.cos(yaw_DVL) * np.sin(pitch_DVL) * np.cos(roll_DVL) + np.sin(yaw_DVL) * np.sin(roll_DVL)],
+    [np.sin(yaw_DVL) * np.cos(pitch_DVL), np.sin(yaw_DVL) * np.sin(pitch_DVL) * np.sin(roll_DVL) + np.cos(yaw_DVL) * np.cos(roll_DVL), np.sin(yaw_DVL) * np.sin(pitch_DVL) * np.cos(roll_DVL) - np.cos(yaw_DVL) * np.sin(roll_DVL)],
+    [ -np.sin(pitch_DVL), np.cos(pitch_DVL) * np.sin(roll_DVL), np.cos(pitch_DVL) * np.cos(roll_DVL)]
+    ])
+
+# 
+
 LATLON_TO_CM = 1.1131884502145034e5
 
 
@@ -48,14 +68,20 @@ class DvlDriver(threading.Thread):
     version = ""
     mav = Mavlink2RestHelper()
     socket = None
-    port = 16171  # Water Linked mentioned they won't allow changing or disabling this
-    current_orientation = DVL_DOWN
+    port = 16171  # Water Linked mentioned they won't allow changing or disabling this 
+
+    # where does it come from? isnt there a uart port for this?
+
+    current_orientation = DVL_CUSTOM_ORIENTATION
     enabled = True
     rangefinder = True
-    hostname = HOSTNAME
+    # hostname = HOSTNAME
     timeout = 3  # tcp timeout in seconds
     origin = [0, 0]
     settings_path = os.path.join(os.path.expanduser("~"), ".config", "dvl", "settings.json")
+
+
+    #  c'est quoi ce truc? ^^^^^^^^^^
 
     should_send = MessageType.POSITION_DELTA
     reset_counter = 0
@@ -64,7 +90,7 @@ class DvlDriver(threading.Thread):
     temperature_check_interval_s = 30
     temperature_too_hot = 45
 
-    def __init__(self, orientation=DVL_DOWN) -> None:
+    def __init__(self, orientation=DVL_CUSTOM_ORIENTATION) -> None:
         threading.Thread.__init__(self)
         self.current_orientation = orientation
         # used for calculating attitude delta
@@ -79,12 +105,13 @@ class DvlDriver(threading.Thread):
         """
         Load settings from .config/dvl/settings.json
         """
+        # dans la fonction SystemInfo.get_settings du Wayfinder, regarder ce qu'il se passe dans Settings de utils.py
         try:
             with open(self.settings_path) as settings:
                 data = json.load(settings)
                 self.enabled = data["enabled"]
                 self.current_orientation = data["orientation"]
-                self.hostname = data["hostname"]
+                # self.hostname = data["hostname"]
                 self.origin = data["origin"]
                 self.rangefinder = data["rangefinder"]
                 self.should_send = data["should_send"]
@@ -117,7 +144,7 @@ class DvlDriver(threading.Thread):
                     {
                         "enabled": self.enabled,
                         "orientation": self.current_orientation,
-                        "hostname": self.hostname,
+                        # "hostname": self.hostname,
                         "rangefinder": self.rangefinder,
                         "should_send": self.should_send,
                     }
@@ -132,56 +159,58 @@ class DvlDriver(threading.Thread):
             "status": self.status,
             "enabled": self.enabled,
             "orientation": self.current_orientation,
-            "hostname": self.hostname,
+            # "hostname": self.hostname,
             "origin": self.origin,
             "rangefinder": self.rangefinder,
             "should_send": self.should_send,
         }
 
-    @property
-    def host(self) -> str:
-        """Make sure there is no port in the hostname allows local testing by where http can be running on other ports than 80"""
-        try:
-            host = self.hostname.split(":")[0]
-        except IndexError:
-            host = self.hostname
-        return host
+    # @property
+    # def host(self) -> str:
+    #     """Make sure there is no port in the hostname that allows local testing by where http can be running on other ports than 80"""
+    #     try:
+    #         host = self.hostname.split(":")[0]
+    #     except IndexError:
+    #         host = self.hostname
+    #     return host
 
     def look_for_dvl(self):
-        """
-        Waits for the dvl to show up at the designated hostname
-        """
-        self.wait_for_cable_guy()
-        ip = self.hostname
-        self.status = f"Trying to talk to dvl at http://{ip}/api/v1/about"
-        while not self.version:
-            if not request(f"http://{ip}/api/v1/about"):
-                self.report_status(f"could not talk to dvl at {ip}, looking for it in the local network...")
-            found_dvl = find_the_dvl()
-            if found_dvl:
-                self.report_status(f"Dvl found at address {found_dvl}, using it instead.")
-                self.hostname = found_dvl
-                return
+        # """
+        # Waits for the dvl to show up at the designated hostname
+        # """
+        # self.wait_for_cable_guy()
+        # ip = self.hostname
+        # self.status = f"Trying to talk to dvl at http://{ip}/api/v1/about"
+        # while not self.version:
+        #     if not request(f"http://{ip}/api/v1/about"):
+        #         self.report_status(f"could not talk to dvl at {ip}, looking for it in the local network...")
+        #     found_dvl = find_the_dvl()
+        #     if found_dvl:
+        #         self.report_status(f"Dvl found at address {found_dvl}, using it instead.")
+        #         self.hostname = found_dvl
+        #         return
             time.sleep(1)
+
+# sombre HISTOIRE DE DOCKER ICI, JE NE COMPRENDS PAS 
 
     def wait_for_cable_guy(self):
-        while not request("http://host.docker.internal/cable-guy/v1.0/ethernet"):
-            self.report_status("waiting for cable-guy to come online...")
-            time.sleep(1)
+        # while not request("http://host.docker.internal/cable-guy/v1.0/ethernet"):
+        #     self.report_status("waiting for cable-guy to come online...")
+        #     time.sleep(1)
 
     def wait_for_vehicle(self):
-        """
-        Waits for a valid heartbeat to Mavlink2Rest
-        """
-        self.report_status("Waiting for vehicle...")
-        while not self.mav.get("/HEARTBEAT"):
-            time.sleep(1)
+        # """
+        # Waits for a valid heartbeat to Mavlink2Rest
+        # """
+        # self.report_status("Waiting for vehicle...")
+        # while not self.mav.get("/HEARTBEAT"):
+        #     time.sleep(1)
 
     def set_orientation(self, orientation: int) -> bool:
         """
-        Sets the DVL orientation, either DVL_FORWARD of DVL_DOWN
+        Sets the DVL orientation, DVL_FORWARD or DVL_DOWN or DVL_CUSTOM_ORIENTATION
         """
-        if orientation in [DVL_FORWARD, DVL_DOWN]:
+        if orientation in [DVL_FORWARD, DVL_DOWN, DVL_CUSTOM_ORIENTATION]:
             self.current_orientation = orientation
             self.save_settings()
             return True
@@ -326,37 +355,37 @@ class DvlDriver(threading.Thread):
             self.mav.set_param("RNGFND1_TYPE", "MAV_PARAM_TYPE_UINT8", 10)  # MAVLINK
 
     def setup_connections(self, timeout=300) -> None:
-        """
-        Sets up the socket to talk to the DVL
-        """
-        while timeout > 0:
-            try:
-                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.socket.connect((self.host, self.port))
-                self.socket.setblocking(0)
-                return True
-            except socket.error:
-                time.sleep(0.1)
-            timeout -= 1
-        self.report_status(f"Setup connection to {self.host}:{self.port} timed out")
-        return False
+        # """
+        # Sets up the socket to talk to the DVL
+        # """
+        # while timeout > 0:
+        #     try:
+        #         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #         self.socket.connect((self.host, self.port))
+        #         self.socket.setblocking(0)
+        #         return True
+        #     except socket.error:
+        #         time.sleep(0.1)
+        #     timeout -= 1
+        # self.report_status(f"Setup connection to {self.host}:{self.port} timed out")
+        # return False
 
     def reconnect(self):
-        if self.socket:
-            try:
-                self.socket.shutdown(socket.SHUT_RDWR)
-                self.socket.close()
-            except Exception as e:
-                self.report_status(f"Unable to reconnect: {e}, looking for dvl again...")
-                self.look_for_dvl()
-        success = self.setup_connections()
-        if success:
-            self.last_recv_time = time.time()  # Don't disconnect directly after connect
-            return True
+        # if self.socket:
+        #     try:
+        #         self.socket.shutdown(socket.SHUT_RDWR)
+        #         self.socket.close()
+        #     except Exception as e:
+        #         self.report_status(f"Unable to reconnect: {e}, looking for dvl again...")
+        #         self.look_for_dvl()
+        # success = self.setup_connections()
+        # if success:
+        #     self.last_recv_time = time.time()  # Don't disconnect directly after connect
+        #     return True
 
-        return False
+        # return False
 
-    def handle_velocity(self, data: Dict[str, Any]) -> None:
+    def handle_velocity(self, arr: bytearray) -> None:
         # extract velocity data from the DVL JSON
         vx, vy, vz, alt, valid, fom = (
             data["vx"],
@@ -366,6 +395,9 @@ class DvlDriver(threading.Thread):
             data["velocity_valid"],
             data["fom"],
         )
+
+        # [vx, vy, vz, vel_err] = struct.unpack("ffff", arr[21:37]) ajouter velocity_valid et fom et réfléchir au format de data ( arr )
+
         dt = data["time"] / 1000
         dx = dt * vx
         dy = dt * vy
@@ -394,12 +426,20 @@ class DvlDriver(threading.Thread):
             if self.current_orientation == DVL_DOWN:
                 position_delta = [dx, dy, dz]
                 attitude_delta = [dRoll, dPitch, dYaw]
-            elif self.current_orientation == DVL_FORWARD:
+            if self.current_orientation == DVL_FORWARD:
                 position_delta = [dz, dy, -dx]
                 attitude_delta = [dYaw, dPitch, -dRoll]
+            
+            if self.current_orientation == DVL_CUSTOM_ORIENTATION:
+                position_delta =  np.matmul(rotMatrix, np.array([dx, dy, dz])).tolist()
+                attitude_delta = np.matmul(rotMatrix, np.array([dRoll, dPitch, dYaw])).tolist()
+
             self.mav.send_vision(position_delta, attitude_delta, dt=data["time"] * 1e3, confidence=confidence)
+                
+                
         elif self.should_send == MessageType.SPEED_ESTIMATE:
-            velocity = [vx, vy, vz] if self.current_orientation == DVL_DOWN else [vz, vy, -vx]  # DVL_FORWARD
+            # velocity = [vx, vy, vz] if self.current_orientation == DVL_DOWN else [vz, vy, -vx]  # DVL_FORWARD
+            velocity = np.matmul(rotMatrix, np.array([vx, vy, vz])).tolist()
             self.mav.send_vision_speed_estimate(velocity)
 
         self.last_attitude = self.current_attitude
@@ -414,19 +454,19 @@ class DvlDriver(threading.Thread):
             )
 
     def check_temperature(self):
-        now = time.time()
-        if now - self.last_temperature_check_time < self.temperature_check_interval_s:
-            return
-        self.last_temperature_check_time = now
-        try:
-            status = json.loads(request(f"http://{self.hostname}/api/v1/about/status"))
+        # now = time.time()
+        # if now - self.last_temperature_check_time < self.temperature_check_interval_s:
+        #     return
+        # self.last_temperature_check_time = now
+        # try:
+        #     status = json.loads(request(f"http://{self.hostname}/api/v1/about/status"))
 
-            temp = float(status["temperature"])
-            if temp > self.temperature_too_hot:
-                self.report_status(f"DVL is too hot ({temp} C). Please cool it down.")
-                self.mav.send_statustext(f"DVL is too hot ({temp} C). Please cool it down.")
-        except Exception as e:
-            self.report_status(e)
+        #     temp = float(status["temperature"])
+        #     if temp > self.temperature_too_hot:
+        #         self.report_status(f"DVL is too hot ({temp} C). Please cool it down.")
+        #         self.mav.send_statustext(f"DVL is too hot ({temp} C). Please cool it down.")
+        # except Exception as e:
+        #     self.report_status(e)
 
     def run(self):
         """
