@@ -8,8 +8,8 @@ import struct
 import datetime
 from enum import Enum, auto
 import numpy as np
-from dvl.packets import AppLayerPacket, AppLayerIdType, calc_checksum
-from dvl.util import Setting, indent_string
+from packets_wayfinder import AppLayerPacket, AppLayerIdType, calc_checksum
+from util_wayfinder import Setting, indent_string
 
 class DateTime():
     """Date and time helper class for getting/setting system time.
@@ -1008,6 +1008,10 @@ class OutputData:
 
         self.reserved = arr[start:-2]
 
+
+    
+        
+
     def is_range_valid(self, beam=None):
         """Returns if range to bottom is valid
 
@@ -1179,6 +1183,23 @@ class OutputData:
                 setting.value_string = "NO DATA"
 
         return settings
+    def into_data(self): 
+        data = {}
+        data["vx"] = self.vel_x
+        data["vy"] = self.vel_y
+        data["vz"] = self.vel_z
+        data["fom"] = self.vel_err
+        # data["r1"] = self.range_beam1   
+        # data["r2"] = self.range_beam2
+        # data["r3"] = self.range_beam3
+        # data["r4"] = self.range_beam4
+        data["type"] = "velocity"
+        data["altitude"] = self.range_beam4
+        data["velocity_valid"] = 0
+        data["fom"] = 0
+        return data
+
+
 
 class FftTest:
     """Class that contains FFT (interference) test

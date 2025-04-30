@@ -28,20 +28,27 @@ if __name__ == "__main__":
                 # Print setup 
                 print (DVL.system_setup)
 
+            # Stop pinging
+            if not DVL.enter_command_mode():
+                print("Failed to stop pinging")
+
+            # Reset to factory defaults (requires Wayfinder to be in 'command mode')
+            if not DVL.reset_to_defaults():
+                print("Failed to reset to factory defaults")
+
             # Collect data - make sure working folder exists
-            # if not DVL.start_logging("c:/temp", "DVL"):
-            #     print("Failed to start logging")
-            # else:
-            #     print("Data logged to {0}".format(DVL.get_log_file_name()))
-            
-            # Start pinging
-            if not DVL.exit_command_mode():
-                print("Failed to start pinging")
+            if not DVL.start_logging("c:/temp", "DVL"):
+                print("Failed to start logging")
+            else:
+                print("Data logged to {0}".format(DVL.get_log_file_name()))
 
             # Register callback function
             DVL.register_ondata_callback(update_data)
-
             
+
+            # Start pinging
+            if not DVL.exit_command_mode():
+                print("Failed to start pinging")
            
 
             # Blocking call to wait for key pressed to end program

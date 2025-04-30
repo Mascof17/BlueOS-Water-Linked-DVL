@@ -1,11 +1,11 @@
 """Contains main Dvl class to connect to Wayfinder.
 """
 import datetime
-from dvl.packets import AppLayerPacket
-from dvl.commands import BinaryCommands, check_response
-from dvl.system import SystemInfo, SystemComponents, SystemFeatures, SystemSetup, \
+from packets_wayfinder import AppLayerPacket
+from commands_wayfinder import BinaryCommands, check_response
+from system_wayfinder import SystemInfo, SystemComponents, SystemFeatures, SystemSetup, \
     SystemTests, FftData
-from dvl.commands import ResponseStatusType, CommandIdType
+from commands_wayfinder import ResponseStatusType, CommandIdType
 
 class Dvl():
     """Main class to connect to Wayfinder.

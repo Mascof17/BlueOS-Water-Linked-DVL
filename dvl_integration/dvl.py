@@ -6,19 +6,14 @@ import json
 import math
 import os
 import numpy as np
-import socket
 import threading
 import time
 from enum import Enum
-from select import select
 from typing import Any, Dict, List
-from Wayfinder_master.dvl.dvl import Dvl
-from Wayfinder_master.dvl.system import OutputData
+from dvl_wayfinder import Dvl
+from system_wayfinder import OutputData
 
 from loguru import logger
-
-from blueoshelper import request
-from dvlfinder import find_the_dvl
 from mavlink2resthelper import GPS_GLOBAL_ORIGIN_ID, Mavlink2RestHelper
 
 # HOSTNAME = "waterlinked-dvl.local"
@@ -64,8 +59,8 @@ class DvlDriver(threading.Thread):
     status = "Starting"
     version = ""
     mav = Mavlink2RestHelper()
-    socket = None
-    port = 16171  # Water Linked mentioned they won't allow changing or disabling this 
+    # socket = None
+    # port = 16171  # Water Linked mentioned they won't allow changing or disabling this 
 
     # where does it come from? isnt there a uart port for this?
 
@@ -171,7 +166,7 @@ class DvlDriver(threading.Thread):
     #         host = self.hostname
     #     return host
 
-    def look_for_dvl(self):
+    # def look_for_dvl(self):
         # """
         # Waits for the dvl to show up at the designated hostname
         # """
@@ -186,16 +181,16 @@ class DvlDriver(threading.Thread):
         #         self.report_status(f"Dvl found at address {found_dvl}, using it instead.")
         #         self.hostname = found_dvl
         #         return
-            time.sleep(1)
+        # time.sleep(1)
 
 # sombre HISTOIRE DE DOCKER ICI, JE NE COMPRENDS PAS 
 
-    def wait_for_cable_guy(self):
+    # def wait_for_cable_guy(self):
         # while not request("http://host.docker.internal/cable-guy/v1.0/ethernet"):
         #     self.report_status("waiting for cable-guy to come online...")
         #     time.sleep(1)
 
-    def wait_for_vehicle(self):
+    # def wait_for_vehicle(self):
         # """
         # Waits for a valid heartbeat to Mavlink2Rest
         # """
@@ -351,7 +346,7 @@ class DvlDriver(threading.Thread):
         if self.rangefinder:
             self.mav.set_param("RNGFND1_TYPE", "MAV_PARAM_TYPE_UINT8", 10)  # MAVLINK
 
-    def setup_connections(self, timeout=300) -> None:
+    # def setup_connections(self, timeout=300) -> None:
         # """
         # Sets up the socket to talk to the DVL
         # """
@@ -367,7 +362,7 @@ class DvlDriver(threading.Thread):
         # self.report_status(f"Setup connection to {self.host}:{self.port} timed out")
         # return False
 
-    def reconnect(self):
+    # def reconnect(self):
         # if self.socket:
         #     try:
         #         self.socket.shutdown(socket.SHUT_RDWR)
@@ -382,7 +377,7 @@ class DvlDriver(threading.Thread):
 
         # return False
 
-    def handle_velocity(self, arr: bytearray) -> None:
+    def handle_velocity(self, data: Dict[str, Any])-> None:
         # extract velocity data from the DVL JSON
         vx, vy, vz, alt, valid, fom = (
             data["vx"],
@@ -392,8 +387,6 @@ class DvlDriver(threading.Thread):
             data["velocity_valid"],
             data["fom"],
         )
-
-        # [vx, vy, vz, vel_err] = struct.unpack("ffff", arr[21:37]) ajouter velocity_valid et fom et réfléchir au format de data ( arr )
 
         dt = data["time"] * 1000
         dx = dt * vx
@@ -450,7 +443,7 @@ class DvlDriver(threading.Thread):
                 self.timestamp, [x, y, z], self.current_attitude, reset_counter=self.reset_counter
             )
 
-    def check_temperature(self):
+    # def check_temperature(self):
         # now = time.time()
         # if now - self.last_temperature_check_time < self.temperature_check_interval_s:
         #     return
@@ -465,76 +458,70 @@ class DvlDriver(threading.Thread):
         # except Exception as e:
         #     self.report_status(e)
 
+
+    def update_data(self, output_data: OutputData, obj):
+        """Prints data time to screen
+        """
+        del obj
+        if output_data is not None:
+            time = output_data.get_date_time()
+            txt = time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            print("Got data {0}".format(txt))
+            data = output_data.into_data()
+            if data["type"] == "velocity":
+                self.handle_velocity(data)
+
+            if data["type"] == "position_local":
+                self.handle_position_local(data)
+                
+
+
     def run(self):
+        DVL.unregister_all_callbacks()
         """
         Runs the main routing
         """
+        PORT = "/dev/ttyS0"  # Example for Linux(raspberry), see on this website: https://bluerobotics.com/learn/navigator-hardware-setup/ at paragraph "serial devices"
         self.load_settings()
-        self.look_for_dvl()
-        self.setup_connections()
-        self.wait_for_vehicle()
+        # self.look_for_dvl()
+        # self.setup_connections()
+        # self.wait_for_vehicle()
         self.setup_mavlink()
         self.setup_params()
         time.sleep(1)
         self.report_status("Running")
         self.last_recv_time = time.time()
-        buf = ""
-        connected = True
+        # buf = ""
+        DVL = Dvl(PORT, 115200) 
+        # Connect to serial port
         while True:
-            if not self.enabled:
-                time.sleep(1)
-                buf = ""  # Reset buf when disabled
-                continue
 
-            r, _, _ = select([self.socket], [], [], 0)
-            data = None
-            if r:
-                try:
-                    recv = self.socket.recv(1024).decode()
-                    connected = True
-                    if recv:
-                        self.last_recv_time = time.time()
-                        buf += recv
-                except socket.error as e:
-                    logger.warning(f"Disconnected: {e}")
-                    connected = False
-                except Exception as e:
-                    logger.warning(f"Error receiving: {e}")
+            if DVL.is_connected():
 
-            # Extract 1 complete line from the buffer if available
-            if len(buf) > 0:
-                lines = buf.split("\n", 1)
-                if len(lines) > 1:
-                    buf = lines[1]
-                    data = json.loads(lines[0])
+                # Get user system setup
+                # if DVL.get_setup():
+                #     # Print setup 
+                #     print (DVL.system_setup)
 
-            if not connected:
-                buf = ""
-                self.report_status("restarting")
-                self.reconnect()
+                # Collect data - make sure working folder exists
+                # if not DVL.start_logging("c:/temp", "DVL"):
+                #     print("Failed to start logging")
+                # else:
+                #     print("Data logged to {0}".format(DVL.get_log_file_name()))
+                
+                # Start pinging
+                if not DVL.exit_command_mode():
+                    print("Failed to start pinging")
+                # Register callback function
+                DVL.register_ondata_callback(self.update_data)
+                # self.check_temperature()
                 time.sleep(0.003)
-                continue
+                
 
-            if not data:
-                if time.time() - self.last_recv_time > self.timeout:
-                    buf = ""
-                    self.report_status("timeout, restarting")
-                    connected = self.reconnect()
-                time.sleep(0.003)
-                continue
+            else:
+                print("Failed to open {0} - make sure it is not used by any other program".format(PORT))
 
-            self.status = "Running"
-
+            # Unregister
             
 
-            if "type" not in data:
-                continue
-
-            if data["type"] == "velocity":
-                self.handle_velocity(arr)
-            elif data["type"] == "position_local":
-                self.handle_position_local(arr)
-
-            self.check_temperature()
-            time.sleep(0.003)
-        logger.error("Driver Quit! This should not happen.")
+            
