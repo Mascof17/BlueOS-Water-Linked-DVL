@@ -12,11 +12,8 @@ import time
 from enum import Enum
 from select import select
 from typing import Any, Dict, List
-from ./Wayfinder-master/dvl/dvl import *
-from ./Wayfinder-master/dvl/commands import *  
-from ./Wayfinder-master/dvl/packets import *  
-from ./Wayfinder-master/dvl/system import *
-from ./Wayfinder-master/dvl/util import *
+from Wayfinder_master.dvl.dvl import Dvl
+from Wayfinder_master.dvl.system import OutputData
 
 from loguru import logger
 
@@ -398,7 +395,7 @@ class DvlDriver(threading.Thread):
 
         # [vx, vy, vz, vel_err] = struct.unpack("ffff", arr[21:37]) ajouter velocity_valid et fom et réfléchir au format de data ( arr )
 
-        dt = data["time"] / 1000
+        dt = data["time"] * 1000
         dx = dt * vx
         dy = dt * vy
         dz = dt * vz
@@ -434,7 +431,7 @@ class DvlDriver(threading.Thread):
                 position_delta =  np.matmul(rotMatrix, np.array([dx, dy, dz])).tolist()
                 attitude_delta = np.matmul(rotMatrix, np.array([dRoll, dPitch, dYaw])).tolist()
 
-            self.mav.send_vision(position_delta, attitude_delta, dt=data["time"] * 1e3, confidence=confidence)
+            self.mav.send_vision(position_delta, attitude_delta, dt = data["time"] * 1e3, confidence=confidence)
                 
                 
         elif self.should_send == MessageType.SPEED_ESTIMATE:
@@ -528,13 +525,15 @@ class DvlDriver(threading.Thread):
 
             self.status = "Running"
 
+            
+
             if "type" not in data:
                 continue
 
             if data["type"] == "velocity":
-                self.handle_velocity(data)
+                self.handle_velocity(arr)
             elif data["type"] == "position_local":
-                self.handle_position_local(data)
+                self.handle_position_local(arr)
 
             self.check_temperature()
             time.sleep(0.003)
