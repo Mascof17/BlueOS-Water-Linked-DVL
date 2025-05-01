@@ -477,7 +477,7 @@ class DvlDriver(threading.Thread):
 
 
     def run(self):
-        DVL.unregister_all_callbacks()
+        DVL = Dvl(PORT, 115200) 
         """
         Runs the main routing
         """
@@ -492,7 +492,6 @@ class DvlDriver(threading.Thread):
         self.report_status("Running")
         self.last_recv_time = time.time()
         # buf = ""
-        DVL = Dvl(PORT, 115200) 
         # Connect to serial port
         while True:
 
@@ -519,7 +518,7 @@ class DvlDriver(threading.Thread):
                 
 
             else:
-                print("Failed to open {0} - make sure it is not used by any other program".format(PORT))
+                DVL.connect(PORT, 115200)
 
             # Unregister
             
